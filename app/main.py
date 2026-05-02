@@ -487,6 +487,20 @@ class AVADesktop:
         self.queue = queue.Queue()
         self.speech = SpeechListener(self._on_voice)
         self._wake_active = False
+        self._qcount = 0
+        self._ccount = 0
+        self._session_start = time.time()
+
+        # Pre-init all StringVars before any build method runs
+        self.stats_vars   = {}
+        self.mem_name_var = tk.StringVar(value="Commander")
+        self.state_var    = tk.StringVar(value='SAY "AVA" + COMMAND  ·  OR CLICK MIC')
+        self.np_var       = tk.StringVar(value="")
+        self.msg_cnt_var  = tk.StringVar(value="0 MSGS")
+        self.session_var  = tk.StringVar(value="SESSION: 00:00")
+        self.query_var    = tk.StringVar(value="QUERIES: 0  ·  CMDS: 0")
+        self.learn_var    = tk.StringVar(value="STYLE: LEARNING...")
+        self.inp_var      = tk.StringVar()
 
         self._build_ui()
         self._init_live_stats()
@@ -595,7 +609,6 @@ class AVADesktop:
         tk.Label(parent, text="◈ AVA MEMORY", font=("Courier",8,"bold"),
                  bg=self.BG2, fg=self.TEXT2).pack(anchor='w', padx=10, pady=(0,4))
 
-        self.mem_name_var = tk.StringVar(value="Commander")
         tk.Label(parent, textvariable=self.mem_name_var, font=("Courier",12,"bold"),
                  bg=self.BG2, fg=self.CYAN).pack(anchor='w', padx=10)
 
@@ -626,13 +639,11 @@ class AVADesktop:
         self.orb_canvas.pack()
         self._draw_orb("IDLE")
 
-        self.state_var = tk.StringVar(value='SAY "AVA" + COMMAND  ·  OR CLICK MIC')
         tk.Label(orb_frame, textvariable=self.state_var, font=("Courier",8),
                  bg=self.BG, fg=self.TEXT2).pack(pady=2)
 
         # Now playing bar
         self.np_frame = tk.Frame(parent, bg="#0a0800", relief='flat')
-        self.np_var = tk.StringVar(value="")
         np_inner = tk.Frame(self.np_frame, bg="#0a0800")
         np_inner.pack(fill='x', padx=8, pady=4)
         tk.Label(np_inner, text="♪", font=("Courier",12), bg="#0a0800", fg=self.YELLOW).pack(side='left', padx=4)
@@ -653,7 +664,6 @@ class AVADesktop:
         chat_header.pack(fill='x')
         tk.Label(chat_header, text="◈ NEURAL COMM LINK  ·  LEARNING ACTIVE",
                  font=("Courier",7,"bold"), bg=self.BG3, fg=self.TEXT2).pack(side='left', padx=10, pady=4)
-        self.msg_cnt_var = tk.StringVar(value="0 MSGS")
         tk.Label(chat_header, textvariable=self.msg_cnt_var,
                  font=("Courier",7), bg=self.BG3, fg=self.TEXT3).pack(side='right', padx=10)
 
@@ -686,7 +696,6 @@ class AVADesktop:
                                   command=self._toggle_listen)
         self.mic_btn.pack(side='left', padx=(0,4))
 
-        self.inp_var = tk.StringVar()
         self.inp = tk.Entry(inp_frame, textvariable=self.inp_var,
                              bg=self.BG2, fg=self.CYAN, font=("Courier",11),
                              insertbackground=self.CYAN, relief='flat', bd=4,
@@ -743,9 +752,6 @@ class AVADesktop:
             btn.bind("<Leave>", lambda e,b=btn: b.config(fg=self.TEXT2))
 
     def _build_bottom(self, parent):
-        self.session_var = tk.StringVar(value="SESSION: 00:00")
-        self.query_var   = tk.StringVar(value="QUERIES: 0  ·  CMDS: 0")
-        self.learn_var   = tk.StringVar(value="STYLE: LEARNING...")
 
         tk.Label(parent, textvariable=self.session_var, font=("Courier",8),
                  bg=self.BG2, fg=self.TEXT2).pack(side='left', padx=12)
@@ -754,9 +760,6 @@ class AVADesktop:
         tk.Label(parent, textvariable=self.learn_var, font=("Courier",8),
                  bg=self.BG2, fg=self.CYAN).pack(side='right', padx=12)
 
-        self._qcount = 0
-        self._ccount = 0
-        self._session_start = time.time()
 
     # ── ORB DRAWING ───────────────────────────────────────────────────────────
     def _draw_orb(self, state="IDLE"):
