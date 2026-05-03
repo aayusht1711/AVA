@@ -26,13 +26,17 @@ import queue
 try: import customtkinter as ctk; HAS_CTK = True
 except: HAS_CTK = False
 
+# Global flags - set properly by import blocks below
+HAS_PYAUDIO = False
+HAS_SD = False
+
 try: import pyttsx3; HAS_TTS = True
 except: HAS_TTS = False
 
 try: import speech_recognition as sr; HAS_SR = True
 except: HAS_SR = False
 
-try: import pvporcupine, pyaudio, struct; HAS_WAKE = True
+try: import pvporcupine, struct; HAS_WAKE = True
 except: HAS_WAKE = False
 
 try:
@@ -75,26 +79,54 @@ OS = sys.platform  # 'win32', 'darwin', 'linux'
 
 # ── Config & persistence ──────────────────────────────────────────────────────
 def cfg():
-    return json.loads(CFG_F.read_text()) if CFG_F.exists() else {}
+    try:
+        if not CFG_F.exists(): return {}
+        # Read as bytes to handle BOM and encoding issues
+        raw = CFG_F.read_bytes()
+        # Strip UTF-8 BOM if present
+        if raw.startswith(b'\xef\xbb\xbf'): raw = raw[3:]
+        text = raw.decode('utf-8', errors='ignore').strip()
+        if not text or text == 'null': return {}
+        return json.loads(text)
+    except Exception as e:
+        print(f"[AVA] Config read error: {e}")
+        return {}
 
 def cfg_set(**kw):
-    c = cfg(); c.update(kw); CFG_F.write_text(json.dumps(c, indent=2))
+    try:
+        c = cfg()
+        c.update(kw)
+        # Write without BOM, pure ASCII-safe JSON
+        data = json.dumps(c, indent=2, ensure_ascii=True)
+        CFG_F.write_bytes(data.encode('utf-8'))
+        print(f"[AVA] Config saved: {list(c.keys())}")
+    except Exception as e:
+        print(f"[AVA] Config save error: {e}")
 
 def mem():
     if MEM_F.exists(): return json.loads(MEM_F.read_text())
     return {"name":"Commander","facts":[],"projects":[],"mood_history":[],"topics":{}}
 
 def mem_set(m):
-    MEM_F.write_text(json.dumps(m, indent=2))
+    try:
+        def fix(obj):
+            if isinstance(obj, set): return list(obj)
+            if isinstance(obj, dict): return {k: fix(v) for k,v in obj.items()}
+            if isinstance(obj, list): return [fix(i) for i in obj]
+            return obj
+        MEM_F.write_bytes(json.dumps(fix(m), indent=2).encode('utf-8'))
+    except Exception as e: print(f"[AVA] Mem save error: {e}")
 
 def hist(n=50):
     if HIST_F.exists(): return json.loads(HIST_F.read_text())[-n:]
     return []
 
 def hist_add(role, text):
-    h = hist(300)
-    h.append({"role":role,"content":text,"ts":datetime.datetime.now().isoformat()})
-    HIST_F.write_text(json.dumps(h[-300:], indent=2))
+    try:
+        h = hist(300)
+        h.append({"role":role,"content":text,"ts":datetime.datetime.now().isoformat()})
+        HIST_F.write_bytes(json.dumps(h[-300:], indent=2).encode('utf-8'))
+    except Exception as e: print(f"[AVA] Hist save error: {e}")
 
 def learn():
     if LEARN_F.exists(): return json.loads(LEARN_F.read_text())
@@ -113,7 +145,14 @@ def learn():
     }
 
 def learn_set(l):
-    LEARN_F.write_text(json.dumps(l, indent=2))
+    try:
+        def fix(obj):
+            if isinstance(obj, set): return list(obj)
+            if isinstance(obj, dict): return {k: fix(v) for k,v in obj.items()}
+            if isinstance(obj, list): return [fix(i) for i in obj]
+            return obj
+        LEARN_F.write_bytes(json.dumps(fix(l), indent=2).encode('utf-8'))
+    except Exception as e: print(f"[AVA] Learn save error: {e}")
 
 # ── Learning engine ───────────────────────────────────────────────────────────
 class LearningEngine:
@@ -232,32 +271,67 @@ LEARNER = LearningEngine()
 # ── Groq AI call ──────────────────────────────────────────────────────────────
 def call_ai(user_msg: str, conversation: list) -> str:
     c = cfg()
-    key = c.get("groq_key","")
+    # Support multiple API providers
+    key = c.get("openrouter_key","") or c.get("gemini_key","") or c.get("groq_key","")
+    provider = "openrouter" if c.get("openrouter_key") else "gemini" if c.get("gemini_key") else "groq"
+    print(f"[AVA] Provider: {provider}, Key found: {bool(key)}, len: {len(key)}")
     if not key:
-        return "I need a Groq API key to think, Commander. Please add it in Settings."
+        return "I need an API key to think, Commander. Please add your OpenRouter key in Settings. Get it free at openrouter.ai"
 
     system = LEARNER.build_persona_prompt()
-    messages = [{"role":"system","content":system}] + conversation[-20:] + [{"role":"user","content":user_msg}]
-
     import urllib.request, urllib.error
-    payload = json.dumps({
-        "model": "llama-3.3-70b-versatile",
-        "max_tokens": 1024,
-        "messages": messages
-    }).encode()
 
-    req = urllib.request.Request(
-        "https://api.groq.com/openai/v1/chat/completions",
-        data=payload,
-        headers={"Content-Type":"application/json","Authorization":f"Bearer {key}"},
-        method="POST"
-    )
+    # Build conversation history
+    messages = [{"role": "system", "content": system}]
+    for msg in conversation[-16:]:
+        messages.append({"role": msg["role"], "content": msg["content"]})
+    messages.append({"role": "user", "content": user_msg})
+
+    if provider == "openrouter":
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        payload = json.dumps({
+            "model": "meta-llama/llama-3.1-8b-instruct:free",
+            "messages": messages,
+            "max_tokens": 1024,
+        }).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {key}",
+            "HTTP-Referer": "https://ava-assistant.app",
+            "X-Title": "AVA Assistant"
+        }
+    else:
+        # Gemini fallback
+        history_text = ""
+        for msg in conversation[-10:]:
+            role = "You" if msg["role"] == "user" else "AVA"
+            history_text += f"{role}: {msg['content']}\n"
+        full_prompt = f"{system}\n\nPrevious conversation:\n{history_text}\nUser: {user_msg}\nAVA:"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={key}"
+        payload = json.dumps({
+            "contents": [{"parts": [{"text": full_prompt}]}],
+            "generationConfig": {"maxOutputTokens": 1024, "temperature": 0.85}
+        }).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+
+    req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read())
-            return data["choices"][0]["message"]["content"].strip()
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if provider == "openrouter":
+                return data["choices"][0]["message"]["content"].strip()
+            else:
+                text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                if text.startswith("AVA:"): text = text[4:].strip()
+                return text
+    except urllib.error.HTTPError as e:
+        err = e.read().decode()
+        print(f"[AVA] HTTP {e.code}: {err[:300]}")
+        return f"Neural link disrupted — HTTP {e.code}. {err[:80]}"
     except Exception as e:
+        print(f"[AVA] Error: {e}")
         return f"Neural link disrupted — {str(e)[:80]}"
+
 
 # ── TTS Engine ────────────────────────────────────────────────────────────────
 class VoiceEngine:
@@ -269,18 +343,30 @@ class VoiceEngine:
     def _init_tts(self):
         if HAS_TTS:
             try:
-                self.engine = pyttsx3.init()
+                self.engine = pyttsx3.init(driverName='sapi5')  # Windows SAPI5
+            except:
+                try:
+                    self.engine = pyttsx3.init()
+                except:
+                    self.engine = None
+                    return
+            try:
                 voices = self.engine.getProperty('voices')
-                # Find female voice
                 female = None
                 for v in voices:
                     name = v.name.lower()
-                    if any(w in name for w in ['female','zira','samantha','victoria','karen','moira','fiona','tessa','susan','hazel','amelie']):
+                    if any(w in name for w in ['female','zira','samantha','victoria','karen','moira','fiona','tessa','susan','hazel','amelie','eva','aria']):
                         female = v; break
-                if female: self.engine.setProperty('voice', female.id)
-                self.engine.setProperty('rate', 165)
+                if female:
+                    self.engine.setProperty('voice', female.id)
+                elif voices:
+                    # Just use second voice if available (usually female on Windows)
+                    if len(voices) > 1:
+                        self.engine.setProperty('voice', voices[1].id)
+                self.engine.setProperty('rate', 160)
                 self.engine.setProperty('volume', 0.95)
-            except: self.engine = None
+            except Exception as e:
+                print(f"[AVA] TTS voice setup: {e}")
 
     def init_eleven(self, api_key: str, voice_name: str = "Rachel"):
         if HAS_ELEVEN:
@@ -332,18 +418,44 @@ VOICE = VoiceEngine()
 class SpeechListener:
     def __init__(self, on_text):
         self.on_text = on_text
-        self.recognizer = sr.Recognizer() if HAS_SR else None
         self.listening = False
+        # Try to init recognizer with sounddevice fallback
+        self.recognizer = sr.Recognizer() if HAS_SR else None
+        self._test_mic()
+
+    def _test_mic(self):
+        """Test if microphone is available."""
+        if not HAS_SR: return
+        try:
+            import sounddevice as sd
+            sd.query_devices(kind='input')
+        except Exception as e:
+            print(f"[AVA] Mic check: {e}")
 
     def listen_once(self):
-        if not self.recognizer: return
+        if not self.recognizer:
+            print("[AVA] Speech recognition not available")
+            return
         def _listen():
             try:
-                with sr.Microphone() as src:
-                    self.recognizer.adjust_for_ambient_noise(src, duration=0.5)
-                    audio = self.recognizer.listen(src, timeout=8, phrase_time_limit=10)
-                text = self.recognizer.recognize_google(audio)
-                self.on_text(text)
+                # Try sounddevice microphone first
+                try:
+                    import sounddevice as sd
+                    import numpy as np
+                    samplerate = 16000
+                    duration = 8
+                    print("[AVA] Listening via sounddevice...")
+                    recording = sd.rec(int(duration * samplerate),
+                                      samplerate=samplerate, channels=1,
+                                      dtype='int16', blocking=True)
+                    audio_data = recording.tobytes()
+                    audio = sr.AudioData(audio_data, samplerate, 2)
+                    text = self.recognizer.recognize_google(audio)
+                    self.on_text(text)
+                    return
+                except Exception as e:
+                    print(f"[AVA] sounddevice listen: {e}")
+
             except sr.WaitTimeoutError: pass
             except sr.UnknownValueError: pass
             except Exception as e: print(f"[AVA] SR error: {e}")
@@ -994,22 +1106,31 @@ class AVADesktop:
         try:
             while True:
                 item = self.queue.get_nowait()
-                if item[0] == "ai_response":
-                    _, user_msg, raw = item
-                    self._handle_ai_response(user_msg, raw)
-                elif item[0] == "search_result":
-                    self._add_msg("ava", item[1], "web")
-                    VOICE.speak(item[1])
-                elif item[0] == "voice_text":
-                    self._process(item[1])
-                elif item[0] == "wake_detected":
-                    self._animate_orb("LISTENING")
-                    self.state_var.set("WAKE WORD DETECTED — SPEAK NOW")
-                    VOICE.speak("Yes, I'm here. What do you need?")
-                    self.root.after(800, self._toggle_listen)
+                try:
+                    if item[0] == "ai_response":
+                        _, user_msg, raw = item
+                        self._handle_ai_response(user_msg, raw)
+                    elif item[0] == "search_result":
+                        self._add_msg("ava", item[1], "web")
+                        try: VOICE.speak(item[1])
+                        except: pass
+                    elif item[0] == "voice_text":
+                        self._process(item[1])
+                    elif item[0] == "wake_detected":
+                        self._animate_orb("LISTENING")
+                        self.state_var.set("WAKE WORD DETECTED — SPEAK NOW")
+                        try: VOICE.speak("Yes, I'm here. What do you need?")
+                        except: pass
+                        self.root.after(800, self._toggle_listen)
+                except Exception as e:
+                    print(f"[AVA] Queue item error: {e}")
         except queue.Empty:
             pass
-        self.root.after(50, self._process_queue)
+        except Exception as e:
+            print(f"[AVA] Queue error: {e}")
+        try:
+            self.root.after(50, self._process_queue)
+        except: pass
 
     # ── VOICE CONTROL ─────────────────────────────────────────────────────────
     def _on_voice(self, text):
@@ -1029,52 +1150,67 @@ class AVADesktop:
     # ── STATS ─────────────────────────────────────────────────────────────────
     def _init_live_stats(self):
         def update():
-            # Clock
-            self.lbl_clock.config(text=datetime.datetime.now().strftime("%H:%M:%S"))
-            # Session
-            elapsed = int(time.time() - self._session_start)
-            self.session_var.set(f"SESSION: {elapsed//60:02d}:{elapsed%60:02d}")
-            # System stats
-            if HAS_PSUTIL:
-                cpu = psutil.cpu_percent()
-                ram = psutil.virtual_memory().percent
-                disk = psutil.disk_usage('/').percent
-                bat = psutil.sensors_battery()
-                bat_pct = round(bat.percent) if bat else 0
-
-                for key, val in [("cpu",cpu),("ram",ram),("disk",disk),("bat",bat_pct)]:
-                    self.stats_vars[key].set(f"{val}%")
-                    bar = self.stats_vars[key+"_bar"]
+            try:
+                # Clock
+                self.lbl_clock.config(text=datetime.datetime.now().strftime("%H:%M:%S"))
+                # Session
+                elapsed = int(time.time() - self._session_start)
+                self.session_var.set(f"SESSION: {elapsed//60:02d}:{elapsed%60:02d}")
+                # System stats
+                if HAS_PSUTIL:
                     try:
-                        parent_w = bar.master.winfo_width()
-                        bar.place(x=0,y=0,relheight=1,width=int(parent_w*(val/100)))
-                        bar.config(bg=self.RED if val>80 else self.CYAN2)
+                        cpu = psutil.cpu_percent()
+                        ram = psutil.virtual_memory().percent
+                        disk = psutil.disk_usage('/').percent
+                        bat = psutil.sensors_battery()
+                        bat_pct = round(bat.percent) if bat else 0
+                        for key, val in [("cpu",cpu),("ram",ram),("disk",disk),("bat",bat_pct)]:
+                            if key in self.stats_vars:
+                                self.stats_vars[key].set(f"{val}%")
+                            bar_key = key+"_bar"
+                            if bar_key in self.stats_vars:
+                                bar = self.stats_vars[bar_key]
+                                try:
+                                    parent_w = bar.master.winfo_width()
+                                    if parent_w > 0:
+                                        bar.place(x=0,y=0,relheight=1,width=int(parent_w*(val/100)))
+                                    bar.config(bg=self.RED if val>80 else self.CYAN2)
+                                except: pass
                     except: pass
-            self.root.after(2000, update)
+            except: pass
+            try:
+                self.root.after(2000, update)
+            except: pass
         update()
 
     # ── BOOT ──────────────────────────────────────────────────────────────────
     def _boot(self):
-        m = mem()
-        name = m.get("name","Commander")
-        l = learn()
-        sessions = l.get("sessions",0)
-        l["sessions"] = sessions + 1
-        learn_set(l)
+        try:
+            m = mem()
+            name = m.get("name","Commander")
+            l = learn()
+            sessions = l.get("sessions",0)
+            l["sessions"] = sessions + 1
+            learn_set(l)
+            greetings = [
+                f"AVA 5.0 online. Good to see you again, {name}.",
+                f"Neural core active, {name}. Ready and learning.",
+                f"Back online, {name}. {l.get('total_messages',0)} messages in my learning model.",
+            ]
+            greeting = greetings[sessions % len(greetings)] if sessions > 0 else                 "Hello! I am AVA 5.0. Add your OpenRouter API key in Settings to activate my brain. Get it free at openrouter.ai"
+            self._add_msg("ava", greeting)
+            try: VOICE.speak(greeting)
+            except Exception as e: print(f"[AVA] Voice: {e}")
+            try: self._set_dot(self.dot_ai, self.GREEN)
+            except: pass
+            try:
+                if HAS_TTS or HAS_ELEVEN: self._set_dot(self.dot_voice, self.GREEN)
+            except: pass
+        except Exception as e:
+            print(f"[AVA] Boot error: {e}")
+            try: self._add_msg("ava", "AVA 5.0 online. Add Groq key in Settings.")
+            except: pass
 
-        greetings = [
-            f"AVA 5.0 online. Good to see you again, {name}. I've been thinking about our conversations.",
-            f"Neural core active, {name}. I'm ready and learning from everything you say.",
-            f"Back online, {name}. My learning model now has {l.get('total_messages',0)} data points from you.",
-        ]
-        greeting = greetings[sessions % len(greetings)] if sessions > 0 else \
-            f"Hello, Commander. I'm AVA 5.0 — your personal AI. The more we talk, the better I understand you. What would you like to do?"
-
-        self._add_msg("ava", greeting)
-        VOICE.speak(greeting)
-        self._set_dot(self.dot_ai, self.GREEN)
-        if HAS_TTS or HAS_ELEVEN: self._set_dot(self.dot_voice, self.GREEN)
-        if HAS_SR: pass  # voice input ready
 
     # ── SETTINGS ─────────────────────────────────────────────────────────────
     def _open_settings(self):
@@ -1089,7 +1225,7 @@ class AVADesktop:
 
         c = cfg()
         fields = [
-            ("GROQ API KEY (required — console.groq.com)", "groq_key", c.get("groq_key",""), False),
+            ("OPENROUTER API KEY (free — openrouter.ai)", "openrouter_key", c.get("openrouter_key",""), False),
             ("ELEVENLABS KEY (optional — elevenlabs.io)", "eleven_key", c.get("eleven_key",""), False),
             ("ELEVENLABS VOICE (Rachel / Bella / Elli / Dorothy)", "eleven_voice", c.get("eleven_voice","Rachel"), True),
             ("TAVILY KEY (optional — tavily.com)", "tavily_key", c.get("tavily_key",""), False),
@@ -1115,7 +1251,7 @@ class AVADesktop:
         def save():
             for key, e in entries.items():
                 v = e.get().strip()
-                if v: cfg_set(**{key:v})
+                if v: cfg_set(**{('gemini_key' if key=='groq_key' else key):v})
             # Reinit ElevenLabs if key changed
             eleven_key = entries["eleven_key"].get().strip()
             eleven_voice = entries["eleven_voice"].get().strip() or "Rachel"
@@ -1135,7 +1271,7 @@ class AVADesktop:
         def start_wake():
             pico_key = entries["pico_key"].get().strip()
             if not pico_key: status_var.set("✗ Picovoice key required"); return
-            if not HAS_WAKE: status_var.set("✗ Install: pip install pvporcupine pyaudio"); return
+            if not HAS_WAKE: status_var.set("✗ Install: pip install pvporcupine sounddevice"); return
             self._start_wake_word(pico_key)
             status_var.set("✓ Wake word engine active!")
             self._set_dot(self.dot_wake, self.GREEN)
@@ -1160,16 +1296,18 @@ class AVADesktop:
         def run():
             try:
                 porc = pvporcupine.create(access_key=pico_key, keywords=["jarvis"])
-                pa   = pyaudio.PyAudio()
-                stream = pa.open(rate=porc.sample_rate, channels=1, format=pyaudio.paInt16,
-                                  input=True, frames_per_buffer=porc.frame_length)
                 self._wake_active = True
-                while self._wake_active:
-                    pcm = stream.read(porc.frame_length, exception_on_overflow=False)
-                    pcm = struct.unpack_from("h"*porc.frame_length, pcm)
+                import sounddevice as sd
+                def callback(indata, frames, t, status):
+                    if not self._wake_active: raise sd.CallbackStop()
+                    pcm = struct.unpack_from("h"*porc.frame_length, bytes(indata)[:porc.frame_length*2])
                     if porc.process(pcm) >= 0:
                         self.queue.put(("wake_detected",))
-                stream.stop_stream(); stream.close(); pa.terminate(); porc.delete()
+                with sd.RawInputStream(samplerate=porc.sample_rate, channels=1, dtype='int16',
+                                       blocksize=porc.frame_length, callback=callback):
+                    while self._wake_active:
+                        import time as _t; _t.sleep(0.1)
+                porc.delete()
             except Exception as e:
                 print(f"[AVA] Wake: {e}")
         threading.Thread(target=run, daemon=True).start()
@@ -1218,7 +1356,7 @@ if __name__ == "__main__":
     print(f"  pyttsx3    : {'✓' if HAS_TTS else '✗ pip install pyttsx3'}")
     print(f"  speech_rec : {'✓' if HAS_SR else '✗ pip install SpeechRecognition'}")
     print(f"  selenium   : {'✓' if HAS_SELENIUM else '✗ pip install selenium'}")
-    print(f"  wake word  : {'✓' if HAS_WAKE else '✗ pip install pvporcupine pyaudio'}")
+    print(f"  wake word  : {'✓' if HAS_WAKE else '✗ pip install pvporcupine sounddevice'}")
     print(f"  elevenlabs : {'✓' if HAS_ELEVEN else '✗ pip install elevenlabs'}")
     print(f"  psutil     : {'✓' if HAS_PSUTIL else '✗ pip install psutil'}")
     print("="*40)
