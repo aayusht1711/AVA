@@ -22,11 +22,11 @@ from tkinter import ttk, scrolledtext
 from pathlib import Path
 import queue
 
-# ── Optional imports ─────────────────────────────────────────────────────────
+
 try: import customtkinter as ctk; HAS_CTK = True
 except: HAS_CTK = False
 
-# Global flags - set properly by import blocks below
+
 HAS_PYAUDIO = False
 HAS_SD = False
 
@@ -66,8 +66,7 @@ except:
     try: import httpx; HAS_GROQ = False
     except: HAS_GROQ = False
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
-ROOT    = Path(__file__).parent
+
 DATA    = ROOT / "data"
 DATA.mkdir(exist_ok=True)
 CFG_F   = DATA / "config.json"
@@ -77,7 +76,7 @@ LEARN_F = DATA / "learning.json"
 
 OS = sys.platform  # 'win32', 'darwin', 'linux'
 
-# ── Config & persistence ──────────────────────────────────────────────────────
+
 def cfg():
     try:
         if not CFG_F.exists(): return {}
