@@ -74,13 +74,13 @@ MEM_F   = DATA / "memory.json"
 HIST_F  = DATA / "history.json"
 LEARN_F = DATA / "learning.json"
 
-OS = sys.platform  # 'win32', 'darwin', 'linux'
+OS = sys.platform  
 
 
 def cfg():
     try:
         if not CFG_F.exists(): return {}
-        # Read as bytes to handle BOM and encoding issues
+        
         raw = CFG_F.read_bytes()
         # Strip UTF-8 BOM if present
         if raw.startswith(b'\xef\xbb\xbf'): raw = raw[3:]
