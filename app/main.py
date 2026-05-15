@@ -130,9 +130,9 @@ def hist_add(role, text):
 def learn():
     if LEARN_F.exists(): return json.loads(LEARN_F.read_text())
     return {
-        "vocab": {},          # words user uses frequently
-        "style": "formal",    # formal | casual | technical
-        "interests": [],      # detected interest topics
+        "vocab": {},         
+        "style": "formal",    
+        "interests": [],     
         "response_prefs": {   # what kind of responses user likes
             "length": "medium",   # short | medium | detailed
             "humor": False,
