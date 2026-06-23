@@ -89,8 +89,8 @@ async def speak(
     )
 
 
-@router.websocket("/ws")
-async def voice_websocket(websocket: WebSocket):
+@router.websocket("/ws/{session_id}")
+async def voice_websocket(websocket: WebSocket, session_id: str):
     """
     Full Voice Pipeline:
     Frontend Audio -> VAD (frontend/backend) -> Whisper STT -> Orchestrator -> ElevenLabs TTS WebSocket -> Frontend Audio Playback
@@ -98,6 +98,9 @@ async def voice_websocket(websocket: WebSocket):
     await websocket.accept()
     audio_buffer = bytearray()
     
+    # Needs a real user ideally, but for demo we mock or expect token in first message
+    current_user_id = "test-user-id" # Simplified for this snippet
+
     try:
         while True:
             # Receive message from frontend (either bytes for audio, or JSON for control signals)
@@ -114,19 +117,62 @@ async def voice_websocket(websocket: WebSocket):
                     # 1. Trigger stop audio stream to frontend to halt any playing response
                     await websocket.send_json({"type": "stop_audio_stream"})
                     
-                    # 2. Send accumulated audio buffer to Whisper
-                    # transcript = await _transcribe_buffer(audio_buffer)
-                    # audio_buffer.clear()
-                    
-                    # 3. Pass to Orchestrator LangGraph Router
-                    # async for ai_chunk in run_ava(user_message=transcript, ...):
-                        # 4. Stream AI text chunks to ElevenLabs WebSocket
-                        # audio_chunk = await _get_elevenlabs_chunk(ai_chunk)
+                    if not audio_buffer:
+                        continue
                         
-                        # 5. Stream ElevenLabs audio chunks back to frontend
-                        # await websocket.send_bytes(audio_chunk)
-                    
-                    pass
+                    # 2. Send accumulated audio buffer to Whisper
+                    try:
+                        async with httpx.AsyncClient() as client:
+                            response = await client.post(
+                                "https://api.groq.com/openai/v1/audio/transcriptions",
+                                headers={"Authorization": f"Bearer {settings.GROQ_API_KEY}"},
+                                files={"file": ("audio.webm", bytes(audio_buffer), "audio/webm")},
+                                data={"model": "whisper-large-v3"},
+                                timeout=30,
+                            )
+                        audio_buffer.clear()
+                        if response.status_code != 200:
+                            continue
+                        transcript = response.json().get("text", "").strip()
+                        if not transcript:
+                            continue
+                            
+                        # Inform frontend we heard them
+                        await websocket.send_json({"type": "transcript", "text": transcript})
+
+                        # 3. Pass to Orchestrator LangGraph Router
+                        from agents.orchestrator import run_ava
+                        
+                        full_response_text = ""
+                        # Note: we need a session history if we want context. Keeping it simple here.
+                        async for event in run_ava(user_message=transcript, user_id=current_user_id, session_id=session_id):
+                            if event["type"] == "chunk":
+                                full_response_text += event["content"]
+                        
+                        # 4. Stream AI text chunks to ElevenLabs WebSocket (Here using REST stream for simplicity)
+                        async def stream_audio_back():
+                            async with httpx.AsyncClient() as client:
+                                async with client.stream(
+                                    "POST",
+                                    f"https://api.elevenlabs.io/v1/text-to-speech/{settings.ELEVENLABS_VOICE_ID}/stream",
+                                    headers={
+                                        "xi-api-key": settings.ELEVENLABS_API_KEY,
+                                        "Content-Type": "application/json",
+                                    },
+                                    json={
+                                        "text": full_response_text,
+                                        "model_id": "eleven_monolingual_v1",
+                                    },
+                                    timeout=60,
+                                ) as resp:
+                                    async for chunk in resp.aiter_bytes(chunk_size=4096):
+                                        await websocket.send_bytes(chunk)
+                        
+                        # Fire and forget the audio stream back
+                        asyncio.create_task(stream_audio_back())
+
+                    except Exception as e:
+                        print(f"Voice pipeline error: {e}")
                     
     except WebSocketDisconnect:
         print("Voice WebSocket disconnected")
