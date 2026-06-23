@@ -12,6 +12,7 @@ from api.chat import router as chat_router
 from api.voice import router as voice_router
 from db.postgres import init_db
 from core.config import settings
+from core.tasks import setup_tasks
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 scheduler = AsyncIOScheduler()
@@ -20,6 +21,7 @@ scheduler = AsyncIOScheduler()
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     await init_db()
+    setup_tasks(scheduler)
     scheduler.start()
     print("✅ AVA Backend online")
     yield

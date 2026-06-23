@@ -191,6 +191,37 @@ async def send_message(
     }
 
 
+# ── WebSocket Manager ──────────────────────────────────────────────────
+
+class ConnectionManager:
+    def __init__(self):
+        # user_id -> list of WebSockets
+        self.active_connections: dict[str, list[WebSocket]] = {}
+
+    def connect(self, user_id: str, websocket: WebSocket):
+        if user_id not in self.active_connections:
+            self.active_connections[user_id] = []
+        self.active_connections[user_id].append(websocket)
+
+    def disconnect(self, user_id: str, websocket: WebSocket):
+        if user_id in self.active_connections:
+            try:
+                self.active_connections[user_id].remove(websocket)
+                if not self.active_connections[user_id]:
+                    del self.active_connections[user_id]
+            except ValueError:
+                pass
+
+    async def broadcast_to_user(self, user_id: str, message: dict):
+        if user_id in self.active_connections:
+            for connection in self.active_connections[user_id]:
+                try:
+                    await connection.send_json(message)
+                except Exception:
+                    pass
+
+manager = ConnectionManager()
+
 # ── WebSocket — real-time streaming ──────────────────────────────────
 
 @router.websocket("/ws/{session_id}")
@@ -220,10 +251,6 @@ async def websocket_chat(
             raw = await websocket.receive_text()
             payload = json.loads(raw)
 
-            user_content = payload.get("content", "").strip()
-            if not user_content:
-                continue
-
             # Auth via token in first payload
             if not current_user_id:
                 incoming_token = payload.get("token", "")
@@ -233,9 +260,15 @@ async def websocket_chat(
                 try:
                     token_data = decode_token(incoming_token)
                     current_user_id = token_data.get("sub")
+                    if current_user_id:
+                        manager.connect(current_user_id, websocket)
                 except Exception:
                     await websocket.send_json({"type": "error", "message": "Invalid token"})
                     continue
+
+            user_content = payload.get("content", "").strip()
+            if not user_content:
+                continue
 
             # Add user message to local history
             session_history.append({"role": "user", "content": user_content})
@@ -268,9 +301,13 @@ async def websocket_chat(
             })
 
     except WebSocketDisconnect:
-        pass
+        if current_user_id:
+            manager.disconnect(current_user_id, websocket)
     except Exception as e:
+        if current_user_id:
+            manager.disconnect(current_user_id, websocket)
         try:
             await websocket.send_json({"type": "error", "message": str(e)})
         except Exception:
             pass
+
