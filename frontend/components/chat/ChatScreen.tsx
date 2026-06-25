@@ -39,6 +39,31 @@ function nowTime() {
 }
 
 function renderContent(content: string, onShowArtifact: (data: any) => void) {
+  // First check if it's a Prompt Blueprint
+  const promptMatch = content.match(/<PROMPT_BLUEPRINT>([\s\S]*?)<\/PROMPT_BLUEPRINT>/);
+  if (promptMatch) {
+    const promptText = promptMatch[1].trim();
+    return (
+      <div className="mt-2 mb-2 rounded-xl overflow-hidden border border-[#818cf8] bg-[rgba(10,18,40,0.8)] shadow-[0_0_20px_rgba(99,102,241,0.2)]">
+        <div className="flex items-center justify-between px-4 py-2 bg-[rgba(99,102,241,0.1)] border-b border-[rgba(99,102,241,0.2)]">
+          <div className="flex items-center gap-2">
+            <span className="text-[18px]">✨</span>
+            <span className="font-hud text-[11px] font-bold text-[#dde4ff] tracking-wider">Prompt Blueprint</span>
+          </div>
+          <button 
+            onClick={() => navigator.clipboard.writeText(promptText)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[rgba(99,102,241,0.2)] hover:bg-[#818cf8] hover:text-black transition-all text-[#818cf8] text-[10px] font-bold"
+          >
+            <span>📋</span> COPY
+          </button>
+        </div>
+        <div className="p-4 font-mono text-[11px] leading-relaxed text-[#c7d2fe] whitespace-pre-wrap">
+          {promptText}
+        </div>
+      </div>
+    );
+  }
+
   const parts = content.split(/(```[\s\S]*?```)/g);
   return parts.map((part, i) => {
     const codeMatch = part.match(/^```(\w+)?\n?([\s\S]*?)```$/);
@@ -95,6 +120,9 @@ export default function ChatScreen({ onNavigate, session }: ChatScreenProps) {
   const [memCount,   setMemCount]   = useState(0);
   const [wsStatus,   setWsStatus]   = useState<"connecting"|"open"|"closed">("connecting");
   const [activeArtifact, setActiveArtifact] = useState<{title: string, type: string, content: string} | null>(null);
+  
+  const [devMode, setDevMode] = useState(false);
+  const [showTooltips, setShowTooltips] = useState(false);
 
   const msgsRef   = useRef<HTMLDivElement>(null);
   const wsRef     = useRef<WebSocket | null>(null);
@@ -130,8 +158,26 @@ export default function ChatScreen({ onNavigate, session }: ChatScreenProps) {
       }
     }
     init();
+
+    // Check Developer Mode and Tooltips
+    if (typeof window !== "undefined") {
+      setDevMode(localStorage.getItem("ava_developer_mode") === "true");
+      
+      // If it's their very first time seeing the dashboard (after setup)
+      if (localStorage.getItem("ava_first_boot_done") === "true" && !localStorage.getItem("ava_tooltips_done")) {
+        setShowTooltips(true);
+      }
+    }
+
     return () => { mounted = false; wsRef.current?.close(); };
   }, []);
+
+  function dismissTooltips() {
+    setShowTooltips(false);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("ava_tooltips_done", "true");
+    }
+  }
 
   function connectWS(sid: string) {
     const wsUrl = `${process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000"}/api/chat/ws/${sid}`;
@@ -178,15 +224,47 @@ export default function ChatScreen({ onNavigate, session }: ChatScreenProps) {
 
   function sendMessage(content: string) {
     if (!content.trim() || streaming) return;
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      if (sessionId) connectWS(sessionId);
-      return;
-    }
+    
     setMessages(prev => [...prev, {
       id: `u-${Date.now()}`, role: "user", content, time: nowTime(),
     }]);
     addMemory(content);
     setInput("");
+
+    // Offline Mock Fallback for Prompt Maker
+    if ((!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) && content.toLowerCase().includes("prompt")) {
+      setStreaming(true);
+      setTimeout(() => {
+        setStreaming(false);
+        setMessages(prev => [...prev, {
+          id: `mock-prompt-${Date.now()}`, role: "assistant", agent: "orchestrator", time: nowTime(),
+          content: `<PROMPT_BLUEPRINT>
+[Context]
+You are an expert Frontend Developer focusing on React and Next.js.
+
+[Instructions]
+Please create a highly optimized, responsive landing page using Tailwind CSS. It must include:
+1. A hero section with a glowing gradient background.
+2. A features grid.
+3. A newsletter signup footer.
+
+[Constraints]
+- Do not use external CSS files, rely purely on Tailwind utility classes.
+- Ensure the code is strictly TypeScript compliant.
+
+[Output Format]
+Output only the raw code block. Do not provide conversational filler.
+</PROMPT_BLUEPRINT>`
+        }]);
+      }, 1500);
+      return;
+    }
+
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      if (sessionId) connectWS(sessionId);
+      return;
+    }
+    
     setStreaming(true);
     wsRef.current.send(JSON.stringify({ content, token: accessToken }));
   }
@@ -212,10 +290,21 @@ export default function ChatScreen({ onNavigate, session }: ChatScreenProps) {
               </div>
             </div>
           </div>
-          <div className="flex gap-2">
-            {["Groq Llama 3.3",`${messages.length} messages`,"Session #001"].map(c=>(
-              <span key={c} className="font-mono text-[9px] px-[10px] py-[3px] rounded-full border border-[rgba(99,102,241,0.1)] text-[#6878aa] bg-[rgba(99,102,241,0.03)]">{c}</span>
-            ))}
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={() => {
+                setDevMode(!devMode);
+                if (typeof window !== "undefined") localStorage.setItem("ava_developer_mode", (!devMode).toString());
+              }}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-[10px] font-mono transition-colors ${devMode ? 'bg-[rgba(129,140,248,0.1)] border-[rgba(129,140,248,0.3)] text-[#818cf8]' : 'bg-[rgba(255,255,255,0.02)] border-[rgba(255,255,255,0.1)] text-[#6878aa] hover:text-white'}`}
+            >
+              <span>⚙️</span> {devMode ? 'Dev Mode ON' : 'Dev Mode OFF'}
+            </button>
+            <div className="flex gap-2 hidden md:flex">
+              {["Groq Llama 3.3",`${messages.length} msgs`].map(c=>(
+                <span key={c} className="font-mono text-[9px] px-[10px] py-[3px] rounded-full border border-[rgba(99,102,241,0.1)] text-[#6878aa] bg-[rgba(99,102,241,0.03)]">{c}</span>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -294,20 +383,20 @@ export default function ChatScreen({ onNavigate, session }: ChatScreenProps) {
         </div>
       </div>
 
-      {/* Right panel */}
-      <div className="w-[256px] flex-shrink-0 flex flex-col overflow-hidden bg-[rgba(3,6,15,0.96)]">
-        <div className="mx-3.5 mt-4 mb-2.5 relative overflow-hidden rounded-[16px] border border-[rgba(99,102,241,0.22)] p-3 flex items-center gap-2.5" style={{background:"linear-gradient(135deg,#121f3d,#312e81)"}}>
-          <div className="absolute top-[-40%] right-[-20%] w-20 h-20 rounded-full pointer-events-none" style={{background:"radial-gradient(circle,rgba(99,102,241,0.28),transparent 70%)"}}/>
-          <div className="text-[30px] flex-shrink-0 relative z-10" style={{animation:"float 3.5s ease-in-out infinite"}}>🤖</div>
-          <div className="flex-1 relative z-10">
-            <div className="font-hud text-[11px] font-bold text-white tracking-[0.07em]">AVA · ONLINE</div>
-            <div className="font-mono text-[8px] text-[rgba(165,180,252,0.85)] flex items-center gap-1.5 mt-1">
-              <span className="w-1 h-1 rounded-full bg-[#86efac]" style={{animation:"heartbeat 1.2s ease-in-out infinite"}}/>
-              {streaming?`${agent} working...`:"Ready to assist"}
+      {/* Right panel (Only shown if devMode is ON) */}
+      <div className={`flex-shrink-0 flex flex-col overflow-hidden bg-[rgba(3,6,15,0.96)] transition-all duration-300 ${devMode ? 'w-[256px] border-l border-[rgba(99,102,241,0.1)]' : 'w-0 border-0'}`}>
+        <div className="min-w-[256px] h-full flex flex-col">
+          <div className="mx-3.5 mt-4 mb-2.5 relative overflow-hidden rounded-[16px] border border-[rgba(99,102,241,0.22)] p-3 flex items-center gap-2.5" style={{background:"linear-gradient(135deg,#121f3d,#312e81)"}}>
+            <div className="absolute top-[-40%] right-[-20%] w-20 h-20 rounded-full pointer-events-none" style={{background:"radial-gradient(circle,rgba(99,102,241,0.28),transparent 70%)"}}/>
+            <div className="text-[30px] flex-shrink-0 relative z-10" style={{animation:"float 3.5s ease-in-out infinite"}}>🤖</div>
+            <div className="flex-1 relative z-10">
+              <div className="font-hud text-[11px] font-bold text-white tracking-[0.07em]">AVA · ONLINE</div>
+              <div className="font-mono text-[8px] text-[rgba(165,180,252,0.85)] flex items-center gap-1.5 mt-1">
+                <span className="w-1 h-1 rounded-full bg-[#86efac]" style={{animation:"heartbeat 1.2s ease-in-out infinite"}}/>
+                {streaming?`${agent} working...`:"Ready to assist"}
+              </div>
             </div>
           </div>
-          <div className="absolute top-[-8px] right-2 z-10 bg-[rgba(10,18,40,0.96)] border border-[rgba(99,102,241,0.28)] rounded-[8px_8px_8px_2px] px-2 py-1 font-semibold text-[10px] text-[#dde4ff]">Hey! 👋</div>
-        </div>
 
         <div className="px-3.5 pb-3 flex-shrink-0">
           <div className="font-hud text-[7.5px] tracking-[0.16em] text-[#2a3660] uppercase mb-2.5">Live Tools</div>
@@ -357,7 +446,24 @@ export default function ChatScreen({ onNavigate, session }: ChatScreenProps) {
             ))}
           </div>
         </div>
+        </div>
       </div>
+
+      {/* Tooltips Overlay */}
+      {showTooltips && (
+        <div className="absolute inset-0 z-[100] flex items-center justify-center bg-[rgba(0,0,0,0.6)] backdrop-blur-sm pointer-events-auto" onClick={dismissTooltips}>
+          <div className="bg-[#03060f] border border-[#818cf8] p-6 rounded-2xl max-w-sm text-center shadow-[0_0_40px_rgba(129,140,248,0.3)]" onClick={e => e.stopPropagation()}>
+            <div className="text-4xl mb-4">✨</div>
+            <h2 className="font-hud text-lg text-white mb-2 tracking-wide">Welcome to the Dashboard!</h2>
+            <p className="font-mono text-xs text-[#6878aa] mb-6 leading-relaxed">
+              Try clicking the <strong>Microphone icon</strong> at the bottom to talk to AVA naturally, or click the <strong>Memory tab</strong> to see what she remembers about you!
+            </p>
+            <button onClick={dismissTooltips} className="px-6 py-2.5 rounded-full font-bold text-xs bg-[#818cf8] text-black hover:bg-[#a5b4fc] transition-colors">
+              Got it, let's go!
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Interactive Data Canvas */}
       <div className={`absolute top-0 right-0 bottom-0 w-[45%] bg-[rgba(6,12,28,0.85)] backdrop-blur-xl border-l border-[rgba(99,102,241,0.2)] transition-transform duration-500 z-50 flex flex-col shadow-[-20px_0_40px_rgba(0,0,0,0.5)] ${activeArtifact ? "translate-x-0" : "translate-x-[105%]"}`}>

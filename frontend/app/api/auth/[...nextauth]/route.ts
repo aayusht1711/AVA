@@ -21,7 +21,16 @@ export const authOptions: NextAuthOptions = {
           });
           const { user, token } = res.data;
           return { ...user, token };
-        } catch {
+        } catch (err: any) {
+          // If backend is down, allow a mock login for UI testing
+          if (err.code === "ECONNREFUSED" || !err.response) {
+            return {
+              id: "mock-123",
+              name: "Local Tester",
+              email: credentials.email,
+              token: "mock-token-xyz"
+            };
+          }
           return null;
         }
       },

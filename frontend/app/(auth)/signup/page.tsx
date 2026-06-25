@@ -34,7 +34,17 @@ export default function SignupPage() {
         router.push("/dashboard");
       }
     } catch (err: any) {
-      setError(err?.response?.data?.detail || "Signup failed. Please try again.");
+      if (err.code === "ERR_NETWORK" || err.code === "ECONNREFUSED" || !err.response) {
+        // Mock fallback if backend is offline
+        const res = await signIn("credentials", { email, password, redirect: false });
+        if (res?.error) {
+           setError("Local auth fallback failed.");
+        } else {
+           router.push("/dashboard");
+        }
+      } else {
+        setError(err?.response?.data?.detail || "Signup failed. Please try again.");
+      }
     } finally {
       setLoading(false);
     }

@@ -17,10 +17,20 @@ export type Screen = "voice" | "splash" | "home" | "chat" | "memory" | "tasks" |
 export default function DashboardPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
-  const [screen, setScreen] = useState<Screen>("voice");
+  const [screen, setScreen] = useState<Screen>("chat"); // Default to chat instead of voice
 
   useEffect(() => {
-    if (status === "unauthenticated") router.push("/login");
+    if (status === "unauthenticated") {
+      router.push("/login");
+      return;
+    }
+    
+    // Check if it's the absolute first boot
+    if (typeof window !== "undefined") {
+      if (!localStorage.getItem("ava_first_boot_done")) {
+        setScreen("splash");
+      }
+    }
   }, [status, router]);
 
   if (status === "loading") {
