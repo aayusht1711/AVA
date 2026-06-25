@@ -16,6 +16,8 @@ export default function VoiceScreen({ onNavigate }: VoiceScreenProps) {
   const wsRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
     // Initialize WebSocket for Phase 4 Voice Pipeline
@@ -54,6 +56,7 @@ export default function VoiceScreen({ onNavigate }: VoiceScreenProps) {
     if (isListening) {
       mediaRef.current?.stop();
       setIsListening(false);
+      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
       return;
     }
 
@@ -70,20 +73,47 @@ export default function VoiceScreen({ onNavigate }: VoiceScreenProps) {
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
       const checkVolume = () => {
-        if (!isListening) return;
+        if (!isListening && !mediaRef.current) return;
         analyser.getByteFrequencyData(dataArray);
         const avg = dataArray.reduce((a, b) => a + b) / dataArray.length;
         setAudioAmplitude(avg);
 
-        // Simple VAD: silence detection > 800ms
+        // Draw Waveform on Canvas
+        if (canvasRef.current) {
+          const ctx = canvasRef.current.getContext("2d");
+          if (ctx) {
+            const width = canvasRef.current.width;
+            const height = canvasRef.current.height;
+            ctx.clearRect(0, 0, width, height);
+            
+            analyser.getByteTimeDomainData(dataArray);
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = "rgba(129,140,248, 0.8)";
+            ctx.beginPath();
+            
+            const sliceWidth = width * 1.0 / analyser.frequencyBinCount;
+            let x = 0;
+            
+            for(let i = 0; i < analyser.frequencyBinCount; i++) {
+              const v = dataArray[i] / 128.0;
+              const y = v * height / 2;
+              if (i === 0) ctx.moveTo(x, y);
+              else ctx.lineTo(x, y);
+              x += sliceWidth;
+            }
+            ctx.lineTo(canvasRef.current.width, canvasRef.current.height/2);
+            ctx.stroke();
+          }
+        }
+
+        // Simple VAD: silence detection > 1000ms
         if (avg < 10) {
           if (!silenceTimerRef.current) {
             silenceTimerRef.current = setTimeout(() => {
               if (wsRef.current?.readyState === WebSocket.OPEN) {
-                // High priority stop signal
                 wsRef.current.send(JSON.stringify({ type: "vad_stop" }));
               }
-            }, 800);
+            }, 1000);
           }
         } else {
           if (silenceTimerRef.current) {
@@ -91,7 +121,7 @@ export default function VoiceScreen({ onNavigate }: VoiceScreenProps) {
             silenceTimerRef.current = null;
           }
         }
-        requestAnimationFrame(checkVolume);
+        animationFrameRef.current = requestAnimationFrame(checkVolume);
       };
       checkVolume();
 
@@ -148,6 +178,9 @@ export default function VoiceScreen({ onNavigate }: VoiceScreenProps) {
         <div className="font-hud text-[12px] tracking-[0.22em] text-[#818cf8] mb-1">
           {isListening ? "AVA IS LISTENING" : "AVA READY"}
         </div>
+        
+        {/* Waveform Canvas */}
+        <canvas ref={canvasRef} width={260} height={60} className="mt-8 opacity-80" />
       </div>
 
       {/* Right — Controls */}

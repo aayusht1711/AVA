@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from api.auth import router as auth_router
 from api.chat import router as chat_router
 from api.voice import router as voice_router
+from api.memory import router as memory_router
 from db.postgres import init_db
 from core.config import settings
 from core.tasks import setup_tasks
@@ -48,6 +49,7 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
 app.include_router(voice_router, prefix="/api/voice", tags=["voice"])
+app.include_router(memory_router, prefix="/api/memory", tags=["memory"])
 
 
 @app.get("/")

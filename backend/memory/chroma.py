@@ -95,6 +95,37 @@ async def delete_user_memories(user_id: str) -> bool:
         return False
 
 
+async def get_all_memories(user_id: str) -> list[dict]:
+    """Get all memories for a user."""
+    client = get_chroma_client()
+    try:
+        collection = await client.get_collection(_collection_name(user_id))
+        results = await collection.get()
+        memories = []
+        if results["ids"]:
+            for id_, doc, meta in zip(results["ids"], results["documents"], results["metadatas"]):
+                memories.append({
+                    "id": id_,
+                    "content": doc,
+                    "metadata": meta,
+                })
+        # sort by created_at descending if exists
+        memories.sort(key=lambda x: x["metadata"].get("created_at", ""), reverse=True)
+        return memories
+    except Exception:
+        return []
+
+async def delete_memory(user_id: str, memory_id: str) -> bool:
+    """Delete a specific memory by ID."""
+    client = get_chroma_client()
+    try:
+        collection = await client.get_collection(_collection_name(user_id))
+        await collection.delete(ids=[memory_id])
+        return True
+    except Exception:
+        return False
+
+
 async def format_memories_for_context(user_id: str, query: str) -> str:
     """
     Retrieve memories and format them as context for the LLM.

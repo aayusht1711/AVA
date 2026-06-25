@@ -38,13 +38,33 @@ function nowTime() {
   return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function renderContent(content: string) {
+function renderContent(content: string, onShowArtifact: (data: any) => void) {
   const parts = content.split(/(```[\s\S]*?```)/g);
   return parts.map((part, i) => {
     const codeMatch = part.match(/^```(\w+)?\n?([\s\S]*?)```$/);
     if (codeMatch) {
       const lang = codeMatch[1] || "code";
       const code = codeMatch[2] || "";
+      
+      // Data Canvas Hook: if it's csv or a generated image link from E2B
+      if (lang === "csv" || content.includes("data:image/png;base64")) {
+        return (
+          <div key={i} className="mt-2 rounded-[10px] overflow-hidden border border-[rgba(134,239,172,0.3)] bg-[rgba(134,239,172,0.05)] p-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-[16px]">📊</span>
+              <div>
+                <div className="text-[12px] font-semibold text-[#86efac]">Data Generated</div>
+                <div className="text-[9px] text-[#2a3660] font-mono">Interactive visualization ready</div>
+              </div>
+            </div>
+            <button onClick={() => onShowArtifact({ title: "Analysis Results", type: lang, content: code || content })}
+              className="px-3 py-1.5 rounded-[6px] bg-[rgba(134,239,172,0.15)] text-[#86efac] text-[10px] font-bold hover:bg-[rgba(134,239,172,0.25)] transition-colors">
+              VIEW ARTIFACT
+            </button>
+          </div>
+        );
+      }
+
       return (
         <div key={i} className="mt-2 rounded-[10px] overflow-hidden border border-[rgba(99,102,241,0.15)]">
           <div className="flex items-center justify-between px-3 py-1.5 bg-[rgba(99,102,241,0.06)] border-b border-[rgba(99,102,241,0.1)]">
@@ -74,6 +94,7 @@ export default function ChatScreen({ onNavigate, session }: ChatScreenProps) {
   const [memEntries, setMemEntries] = useState<string[]>([]);
   const [memCount,   setMemCount]   = useState(0);
   const [wsStatus,   setWsStatus]   = useState<"connecting"|"open"|"closed">("connecting");
+  const [activeArtifact, setActiveArtifact] = useState<{title: string, type: string, content: string} | null>(null);
 
   const msgsRef   = useRef<HTMLDivElement>(null);
   const wsRef     = useRef<WebSocket | null>(null);
@@ -221,7 +242,7 @@ export default function ChatScreen({ onNavigate, session }: ChatScreenProps) {
                 <div className={`px-4 py-3 rounded-[18px] text-[13px] font-medium leading-relaxed relative overflow-hidden whitespace-pre-wrap ${msg.role==="assistant"?"bg-[rgba(6,12,26,0.98)] border border-[rgba(99,102,241,0.22)] rounded-bl-[4px] text-[#dde4ff]":"border border-[rgba(99,102,241,0.3)] rounded-br-[4px] text-[#e0e7ff]"}`}
                   style={msg.role==="user"?{background:"linear-gradient(135deg,#312e81,#4f46e5)"}:{}}>
                   {msg.role==="assistant"&&<div className="absolute top-0 left-0 right-0 h-px" style={{background:"linear-gradient(90deg,#4f46e5,transparent 55%)",opacity:0.45}}/>}
-                  {renderContent(msg.content)}
+                  {renderContent(msg.content, setActiveArtifact)}
                   {streaming&&msg.id===msgIdRef.current&&(
                     <span className="inline-block w-[2px] h-[14px] bg-[#818cf8] ml-0.5 align-middle" style={{animation:"blink .8s ease-in-out infinite"}}/>
                   )}
@@ -334,6 +355,25 @@ export default function ChatScreen({ onNavigate, session }: ChatScreenProps) {
                 <div className="font-hud text-[13px] text-[#818cf8] mt-0.5 leading-none">{s.value}<span className="text-[8px] text-[#2a3660]">{s.unit}</span></div>
               </div>
             ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Interactive Data Canvas */}
+      <div className={`absolute top-0 right-0 bottom-0 w-[45%] bg-[rgba(6,12,28,0.85)] backdrop-blur-xl border-l border-[rgba(99,102,241,0.2)] transition-transform duration-500 z-50 flex flex-col shadow-[-20px_0_40px_rgba(0,0,0,0.5)] ${activeArtifact ? "translate-x-0" : "translate-x-[105%]"}`}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[rgba(99,102,241,0.1)] bg-[rgba(3,6,15,0.6)]">
+          <div className="flex items-center gap-3">
+            <span className="text-[20px]">📊</span>
+            <div>
+              <div className="font-hud text-[14px] font-bold text-[#dde4ff] tracking-[0.05em]">{activeArtifact?.title || "Data Canvas"}</div>
+              <div className="font-mono text-[9px] text-[#86efac]">Interactive Visualization</div>
+            </div>
+          </div>
+          <button onClick={() => setActiveArtifact(null)} className="w-8 h-8 rounded-full flex items-center justify-center bg-[rgba(255,255,255,0.05)] hover:bg-[rgba(255,255,255,0.1)] text-[#dde4ff] transition-colors">✕</button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-4">
+          <div className="font-mono text-[11px] text-[#93c5fd] bg-[rgba(0,0,0,0.4)] p-4 rounded-[12px] border border-[rgba(99,102,241,0.1)] whitespace-pre-wrap">
+            {activeArtifact?.content}
           </div>
         </div>
       </div>
