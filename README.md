@@ -194,3 +194,6 @@ User message
      │
      └─── everything else                        ──→  Groq/Gemini direct
 ```
+
+---
+*Updated for Phase 2 implementation.*
