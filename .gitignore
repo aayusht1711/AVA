@@ -6,3 +6,6 @@ __pycache__/
 venv/
 env/
 .env.local
+
+# OS files
+.DS_Store
