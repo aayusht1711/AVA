@@ -108,8 +108,8 @@ ava/
 | Phase | What | Status |
 |-------|------|--------|
 | **1** | FastAPI + PostgreSQL + NextAuth + WebSocket + UI | ✅ **Done** |
-| 2 | Groq + Gemini routing + LangGraph orchestrator | 🔜 Next |
-| 3 | All 8 agents (Coder, Researcher, Document, Memory, File, Data, Task) | 🔜 |
+| **2** | Groq + Gemini routing + LangGraph orchestrator | ✅ **Done** |
+| 3 | All 8 agents (Coder, Researcher, Document, Memory, File, Data, Task) | 🔜 Next |
 | 4 | ElevenLabs voice pipeline + Whisper STT | 🔜 |
 | 5 | ChromaDB long-term memory + E2B sandbox | 🔜 |
 | 6 | Google Cloud Run deployment | 🔜 |
