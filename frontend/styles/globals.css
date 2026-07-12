@@ -38,12 +38,9 @@ html, body {
   background-size: 52px 52px;
 }
 
-/* Orb glow */
 .orb-glow {
   box-shadow: 0 0 30px rgba(99,102,241,0.4), 0 0 60px rgba(99,102,241,0.15);
 }
-
-/* Glass card */
 .glass {
   background: rgba(10, 18, 40, 0.85);
   backdrop-filter: blur(12px);
