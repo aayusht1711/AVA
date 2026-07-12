@@ -1,5 +1,4 @@
 import { Screen } from "@/app/dashboard/page";
-
 export default function FilesScreen({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   return (
     <div className="w-full h-full flex flex-col items-center justify-center text-white p-8">
