@@ -3,7 +3,6 @@ AVA Memory — ChromaDB Vector Store
 Stores long-term memories per user.
 Each memory = a text chunk embedded and stored with metadata.
 """
-
 import chromadb
 from chromadb.config import Settings as ChromaSettings
 import uuid
