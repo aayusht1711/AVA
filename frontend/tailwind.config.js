@@ -7,7 +7,7 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // AVA Design System — Dark Navy + Purple
+        
         navy: {
           DEFAULT: "#03060f",
           2: "#060d1c",
