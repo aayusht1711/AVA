@@ -1,7 +1,6 @@
 /**
  * AVA API Client — axios with auto auth headers
  */
-
 import axios from "axios";
 import { getSession } from "next-auth/react";
 
