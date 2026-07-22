@@ -9,7 +9,6 @@ import uuid
 from datetime import datetime
 from core.config import settings
 
-
 def get_chroma_client() -> chromadb.AsyncHttpClient:
     return chromadb.AsyncHttpClient(
         host=settings.CHROMA_HOST,
